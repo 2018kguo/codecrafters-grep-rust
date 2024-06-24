@@ -1,20 +1,23 @@
+use parser::*;
 use std::env;
 use std::io;
 use std::process;
 
+mod parser;
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    if pattern.chars().count() == 1 {
-        return input_line.contains(pattern);
-    } else {
-        panic!("Unhandled pattern: {}", pattern)
+    let parsed_pattern = parse_pattern(pattern);
+    let context = Context::new(0, 0);
+    match parsed_pattern {
+        Ok(p) => match_patterns(input_line, &p, &context),
+        Err(e) => {
+            panic!("Error parsing pattern: {}", e);
+        }
     }
 }
 
 // Usage: echo <input_text> | your_grep.sh -E <pattern>
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
     if env::args().nth(1).unwrap() != "-E" {
         println!("Expected first argument to be '-E'");
         process::exit(1);
