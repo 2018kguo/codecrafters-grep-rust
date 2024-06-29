@@ -66,6 +66,11 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
             '[' => {
                 let mut negative = false;
                 let next_char = pattern_str.chars().nth(index + 1);
+                let closing_bracket = ']';
+                let index_of_matching_bracket = pattern_str[index..]
+                    .find(closing_bracket)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid character group"))?;
+
                 match next_char {
                     Some('^') => {
                         negative = true;
@@ -74,10 +79,6 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                     None => return Err(anyhow::anyhow!("Invalid character group")),
                     _ => (),
                 }
-                let closing_bracket = ']';
-                let index_of_matching_bracket = pattern_str[index..]
-                    .find(closing_bracket)
-                    .ok_or_else(|| anyhow::anyhow!("Invalid character group"))?;
                 let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
                 let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
                 let unwrapped_patterns = match patterns_parsed_from_group {
