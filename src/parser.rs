@@ -1,7 +1,11 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
 
+#[derive(Debug, Clone)]
 pub struct Sequence(Vec<Box<Pattern>>);
 
+#[derive(Debug, Clone)]
 pub enum Pattern {
     LiteralString(String),
     DigitChar,
@@ -40,16 +44,16 @@ fn parse_escape_char(c: char) -> Pattern {
 fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
     let mut patterns = Vec::new();
     let mut index = 0;
-    let mut pattern_chars = pattern_str.chars();
-    while let Some(c) = pattern_chars.next() {
-        match c {
+    let pattern_chars: Vec<char> = pattern_str.chars().into_iter().collect();
+    while index < pattern_str.len() {
+        match pattern_str.chars().nth(index).unwrap() {
             '.' => patterns.push(Pattern::WildcardChar),
             '\\' => {
-                let c = pattern_chars
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("Invalid escape character"))?;
                 index += 1;
-                patterns.push(parse_escape_char(c));
+                let c = pattern_chars
+                    .get(index)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid escape character"))?;
+                patterns.push(parse_escape_char(*c));
             }
             '+' => {
                 let last_pattern = patterns.pop().unwrap();
@@ -76,15 +80,16 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                     .ok_or_else(|| anyhow::anyhow!("Invalid character group"))?;
                 let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
                 let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
+                let unwrapped_patterns = match patterns_parsed_from_group {
+                    Pattern::Sequence(p) => p,
+                    _ => vec![Box::new(patterns_parsed_from_group.clone())],
+                };
                 if negative {
-                    patterns.push(Pattern::NegativeCharacterGroup(vec![Box::new(
-                        patterns_parsed_from_group,
-                    )]));
+                    patterns.push(Pattern::NegativeCharacterGroup(unwrapped_patterns));
                 } else {
-                    patterns.push(Pattern::PositiveCharacterGroup(vec![Box::new(
-                        patterns_parsed_from_group,
-                    )]));
+                    patterns.push(Pattern::PositiveCharacterGroup(unwrapped_patterns));
                 }
+                index = index_of_matching_bracket;
             }
             '^' => patterns.push(Pattern::StartOfLine),
             '$' => patterns.push(Pattern::EndOfLine),
@@ -114,7 +119,10 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
             '|' => {
                 unimplemented!();
             }
-            _ => patterns.push(Pattern::LiteralString(c.to_string())),
+            _ => {
+                let c = pattern_chars.get(index).unwrap();
+                patterns.push(Pattern::LiteralString(c.to_string()))
+            }
         }
         index += 1;
     }
@@ -262,136 +270,142 @@ mod tests {
         };
     }
 
+    macro_rules! c {
+        () => {
+            &Context::new(0, 0)
+        };
+    }
+
     #[test]
     fn test_match_single_character() {
         let input_line = "a";
         let pattern = ls!("a");
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_match_single_character_fail() {
         let input_line = "a";
         let pattern = ls!("b");
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_match_number() {
         let input_line = "123";
         let pattern = Pattern::DigitChar;
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_match_basic_sequence() {
         let input_line = "abc";
         let pattern = seq!(ls!("a"), ls!("b"), ls!("c"));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "ab";
         let pattern = seq!(ls!("a"), ls!("c"));
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "abc";
         let pattern = seq!(ls!("a"), alp!(), ls!("c"));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "abc";
         let pattern = seq!(ls!("a"), dig!(), ls!("c"));
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_one_or_more() {
         let input_line = "a";
         let pattern = Pattern::OneOrMore(Box::new(ls!("a")));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "aa";
         let pattern = Pattern::OneOrMore(Box::new(ls!("a")));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "b";
         let pattern = Pattern::OneOrMore(Box::new(ls!("a")));
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "";
         let pattern = Pattern::OneOrMore(Box::new(ls!("a")));
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_zero_or_one() {
         let input_line = "a";
         let pattern = Pattern::ZeroOrOne(Box::new(ls!("a")));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "aa";
         let pattern = Pattern::ZeroOrOne(Box::new(ls!("a")));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "";
         let pattern = Pattern::ZeroOrOne(Box::new(ls!("a")));
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "b";
         let pattern = Pattern::ZeroOrOne(Box::new(ls!("a")));
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_wildcard() {
         let input_line = "a";
         let pattern = Pattern::WildcardChar;
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "aa";
         let pattern = Pattern::WildcardChar;
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "";
         let pattern = Pattern::WildcardChar;
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "a";
         let pattern = seq!(ls!("a"), Pattern::WildcardChar);
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "a?";
         let pattern = seq!(ls!("a"), Pattern::WildcardChar);
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
     fn test_character_group() {
         let input_line = "a";
         let pattern = Pattern::PositiveCharacterGroup(vec![b!(ls!("a"))]);
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "b";
         let pattern = Pattern::PositiveCharacterGroup(vec![b!(ls!("a"))]);
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "a";
         let pattern = Pattern::NegativeCharacterGroup(vec![b!(ls!("a"))]);
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "b";
         let pattern = Pattern::NegativeCharacterGroup(vec![b!(ls!("a"))]);
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "a";
         let pattern = Pattern::PositiveCharacterGroup(vec![b!(Pattern::AlphanumericChar)]);
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
 
         let input_line = "";
         let pattern = Pattern::PositiveCharacterGroup(vec![b!(Pattern::AlphanumericChar)]);
-        assert!(!match_patterns(input_line, &pattern));
+        assert!(!match_patterns(input_line, &pattern, c!()));
 
         let input_line = "a";
         let pattern = Pattern::PositiveCharacterGroup(vec![b!(ls!("a")), b!(ls!("b"))]);
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
     }
 
     #[test]
@@ -405,6 +419,6 @@ mod tests {
             Pattern::DigitChar,
             ls!(" dog")
         );
-        assert!(match_patterns(input_line, &pattern));
+        assert!(match_patterns(input_line, &pattern, c!()));
     }
 }
