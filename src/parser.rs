@@ -3,26 +3,26 @@
 use anyhow::Result;
 
 #[derive(Debug, Clone)]
-pub struct Sequence(Vec<Box<Pattern>>);
+pub struct Sequence(Vec<Pattern>);
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
     LiteralString(String),
     DigitChar,
     AlphanumericChar,
-    PositiveCharacterGroup(Vec<Box<Pattern>>),
-    NegativeCharacterGroup(Vec<Box<Pattern>>),
+    PositiveCharacterGroup(Vec<Pattern>),
+    NegativeCharacterGroup(Vec<Pattern>),
     StartOfLine,
     EndOfLine,
     OneOrMore(Box<Pattern>),
     ZeroOrOne(Box<Pattern>),
     WildcardChar,
     Alternation(Vec<Sequence>),
-    Sequence(Vec<Box<Pattern>>),
+    Sequence(Vec<Pattern>),
 }
 
 pub fn parse_pattern(pattern: &str) -> Result<Pattern> {
-    Ok(parse_pattern_inner(pattern)?)
+    parse_pattern_inner(pattern)
 }
 
 fn parse_escape_char(c: char) -> Pattern {
@@ -30,12 +30,12 @@ fn parse_escape_char(c: char) -> Pattern {
         'd' => Pattern::DigitChar,
         'w' => Pattern::AlphanumericChar,
         's' => Pattern::PositiveCharacterGroup(vec![
-            Box::new(Pattern::LiteralString(" ".to_string())),
-            Box::new(Pattern::LiteralString("\t".to_string())),
+            Pattern::LiteralString(" ".to_string()),
+            Pattern::LiteralString("\t".to_string()),
         ]),
         'S' => Pattern::NegativeCharacterGroup(vec![
-            Box::new(Pattern::LiteralString(" ".to_string())),
-            Box::new(Pattern::LiteralString("\t".to_string())),
+            Pattern::LiteralString(" ".to_string()),
+            Pattern::LiteralString("\t".to_string()),
         ]),
         _ => Pattern::LiteralString(c.to_string()),
     }
@@ -44,7 +44,7 @@ fn parse_escape_char(c: char) -> Pattern {
 fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
     let mut patterns = Vec::new();
     let mut index = 0;
-    let pattern_chars: Vec<char> = pattern_str.chars().into_iter().collect();
+    let pattern_chars: Vec<char> = pattern_str.chars().collect();
     while index < pattern_str.len() {
         match pattern_str.chars().nth(index).unwrap() {
             '.' => patterns.push(Pattern::WildcardChar),
@@ -82,7 +82,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                 let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
                 let unwrapped_patterns = match patterns_parsed_from_group {
                     Pattern::Sequence(p) => p,
-                    _ => vec![Box::new(patterns_parsed_from_group.clone())],
+                    _ => vec![patterns_parsed_from_group.clone()],
                 };
                 if negative {
                     patterns.push(Pattern::NegativeCharacterGroup(unwrapped_patterns));
@@ -129,9 +129,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
     if patterns.len() == 1 {
         Ok(patterns.pop().unwrap())
     } else {
-        Ok(Pattern::Sequence(
-            patterns.into_iter().map(|p| Box::new(p)).collect(),
-        ))
+        Ok(Pattern::Sequence(patterns.into_iter().collect()))
     }
 }
 
@@ -222,7 +220,7 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
         Pattern::Sequence(patterns) => {
             let mut input_line = input_line;
             for p in patterns {
-                if let Pattern::ZeroOrOne(_) = **p {
+                if let Pattern::ZeroOrOne(_) = *p {
                     if !match_patterns(input_line, p, context) {
                         continue;
                     }
@@ -248,7 +246,7 @@ mod tests {
 
     macro_rules! seq {
         ($($p:expr),*) => {
-            Pattern::Sequence(vec![$(Box::new($p)),*])
+            Pattern::Sequence(vec![$($p),*])
         };
     }
 
@@ -266,7 +264,7 @@ mod tests {
 
     macro_rules! b {
         ($p:expr) => {
-            Box::new($p)
+            $p
         };
     }
 
