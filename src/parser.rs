@@ -148,6 +148,19 @@ impl Context {
     }
 }
 
+pub fn find_match_within_line(
+    input_line: &str,
+    pattern: &Pattern,
+    context: &Context,
+) -> Option<usize> {
+    for i in 0..input_line.len() {
+        if match_patterns(&input_line[i..], pattern, context) {
+            return Some(i);
+        }
+    }
+    None
+}
+
 pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) -> bool {
     match pattern {
         Pattern::LiteralString(s) => input_line.starts_with(s),
