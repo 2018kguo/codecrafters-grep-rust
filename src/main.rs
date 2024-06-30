@@ -7,10 +7,9 @@ mod parser;
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     let parsed_pattern = parse_pattern(pattern);
-    println!("Parsed pattern: {:?}", parsed_pattern);
-    let context = Context::new(0, 0);
+    //println!("Parsed pattern: {:?}", parsed_pattern);
     match parsed_pattern {
-        Ok(p) => find_match_within_line(input_line, &p, &context) != None,
+        Ok(p) => find_match_within_line(input_line, &p).is_some(),
         Err(e) => {
             panic!("Error parsing pattern: {}", e);
         }

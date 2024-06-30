@@ -134,6 +134,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Context {
     index: usize,
     len_original_str: usize,
@@ -148,11 +149,7 @@ impl Context {
     }
 }
 
-pub fn find_match_within_line(
-    input_line: &str,
-    pattern: &Pattern,
-    context: &Context,
-) -> Option<usize> {
+pub fn find_match_within_line(input_line: &str, pattern: &Pattern) -> Option<usize> {
     for i in 0..input_line.len() {
         let cur_context = Context::new(i, input_line.len());
         if match_patterns(&input_line[i..], pattern, &cur_context) {
@@ -163,6 +160,7 @@ pub fn find_match_within_line(
 }
 
 pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) -> bool {
+    //println!("matching pattern: {:?} with input line: {}", pattern, input_line);
     match pattern {
         Pattern::LiteralString(s) => input_line.starts_with(s),
         Pattern::DigitChar => {
@@ -198,6 +196,7 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
             }
         }
         Pattern::StartOfLine => {
+            println!("context is {:?}, input string is {}", context, input_line);
             if context.index == 0 {
                 return true;
             }
@@ -208,7 +207,7 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
             }
         }
         Pattern::EndOfLine => {
-            if context.index == context.len_original_str - 1 {
+            if context.index >= context.len_original_str {
                 return true;
             }
             let next_char = input_line.chars().next_back();
@@ -234,12 +233,15 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
             .any(|s| s.0.iter().all(|p| match_patterns(input_line, p, context))),
         Pattern::Sequence(patterns) => {
             let mut input_line = input_line;
+            let mut index_in_line = context.index;
             for p in patterns {
+                let new_ctx = Context::new(index_in_line, context.len_original_str);
+                //println!("index in line: {}, input line: {}", index_in_line, input_line);
                 if let Pattern::ZeroOrOne(_) = *p {
-                    if !match_patterns(input_line, p, context) {
+                    if !match_patterns(input_line, p, &new_ctx) {
                         continue;
                     }
-                } else if !match_patterns(input_line, p, context) {
+                } else if !match_patterns(input_line, p, &new_ctx) {
                     return false;
                 }
                 let increment = match p {
@@ -249,6 +251,9 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
                     _ => 1,
                 };
                 input_line = &input_line[increment..];
+                index_in_line += increment;
+                //println!("pattern matched: {:?}", p);
+                //println!("index in line: {}, input line: {}", index_in_line, input_line);
             }
             true
         }
