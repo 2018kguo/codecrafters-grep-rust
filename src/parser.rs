@@ -154,7 +154,8 @@ pub fn find_match_within_line(
     context: &Context,
 ) -> Option<usize> {
     for i in 0..input_line.len() {
-        if match_patterns(&input_line[i..], pattern, context) {
+        let cur_context = Context::new(i, input_line.len());
+        if match_patterns(&input_line[i..], pattern, &cur_context) {
             return Some(i);
         }
     }
@@ -241,7 +242,13 @@ pub fn match_patterns(input_line: &str, pattern: &Pattern, context: &Context) ->
                 } else if !match_patterns(input_line, p, context) {
                     return false;
                 }
-                input_line = &input_line[1..];
+                let increment = match p {
+                    Pattern::LiteralString(s) => s.len(),
+                    Pattern::StartOfLine => 0,
+                    Pattern::EndOfLine => 0,
+                    _ => 1,
+                };
+                input_line = &input_line[increment..];
             }
             true
         }
