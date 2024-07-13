@@ -59,7 +59,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                 let last_pattern = patterns.pop().unwrap();
                 patterns.push(Pattern::OneOrMore(Box::new(last_pattern)));
             }
-            '*' => {
+            '?' => {
                 let last_pattern = patterns.pop().unwrap();
                 patterns.push(Pattern::ZeroOrOne(Box::new(last_pattern)));
             }
