@@ -95,27 +95,44 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
             '^' => patterns.push(Pattern::StartOfLine),
             '$' => patterns.push(Pattern::EndOfLine),
             '(' => {
-                unimplemented!();
-                //let mut sequences = Vec::new();
-                //while let Some(c) = pattern_chars.next() {
-                //    let mut current_sequence_string = "".to_string();
-                //    match c {
-                //        ')' => {
-                //            let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
-                //            sequences.push(Box::new(parsed_pattern));
-                //            break;
-                //        }
-                //        '|' => {
-                //            let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
-                //            sequences.push(Box::new(parsed_pattern));
-                //        }
-                //        _ => {
-                //            current_sequence_string.push(c);
-                //        }
-                //    }
-                //}
-                //let sequence = Sequence(sequences);
-                //patterns.push(Pattern::Alternation(Box::new(sequence)));
+                let mut sequences: Vec<Sequence> = Vec::new();
+                let mut seq_index = index + 1;
+                let mut current_sequence_string = "".to_string();
+                while pattern_str.chars().nth(seq_index).unwrap() != ')' {
+                    match pattern_str.chars().nth(seq_index) {
+                        Some('|') => {
+                            let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
+                            match parsed_pattern {
+                                Pattern::Sequence(p) => {
+                                    sequences.push(Sequence(p));
+                                }
+                                _ => {
+                                    return Err(anyhow::anyhow!("Invalid pattern"));
+                                }
+                            }
+                            current_sequence_string = "".to_string();
+                        }
+                        Some(c) => {
+                            current_sequence_string.push(c);
+                        }
+                        None => {
+                            return Err(anyhow::anyhow!("Invalid pattern"));
+                        }
+                    }
+                    seq_index += 1;
+                }
+                // parse the last alternation from the last separator
+                let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
+                match parsed_pattern {
+                    Pattern::Sequence(p) => {
+                        sequences.push(Sequence(p));
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!("Invalid pattern"));
+                    }
+                }
+                patterns.push(Pattern::Alternation(sequences));
+                index = seq_index;
             }
             '|' => {
                 unimplemented!();
@@ -263,11 +280,21 @@ pub fn match_patterns(
             }
         }
         Pattern::WildcardChar => (!input_line.is_empty(), 1),
-        Pattern::Alternation(_sequences) => unimplemented!(),
-        //sequences.iter().any(|s| {
-        //    s.0.iter()
-        //        .all(|p| match_patterns(input_line, p, context, index))
-        //}),
+        Pattern::Alternation(sequences) => {
+            // return the increment of the first matching sequence
+            for seq in sequences {
+                let (found, increment) = match_patterns(
+                    input_line,
+                    &Pattern::Sequence(seq.0.clone()),
+                    context,
+                    index,
+                );
+                if found {
+                    return (true, increment);
+                }
+            }
+            (false, 0)
+        }
         Pattern::Sequence(patterns) => {
             let mut index_increment = 0;
             //let mut index_in_line = context.index;
