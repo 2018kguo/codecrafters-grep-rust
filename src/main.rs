@@ -7,7 +7,8 @@ mod parser;
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     let parsed_pattern = parse_pattern(pattern);
-    //println!("Parsed pattern: {:?}", parsed_pattern);
+    println!("pattern: {}", pattern);
+    println!("Parsed pattern: {:?}", parsed_pattern);
     match parsed_pattern {
         Ok(p) => find_match_within_line(input_line, &p).is_some(),
         Err(e) => {

@@ -166,8 +166,8 @@ pub fn match_patterns(
     index: usize,
 ) -> (bool, usize) {
     println!(
-        "matching pattern: {:?} with input line: {}, and index: {}",
-        pattern, input_line, index
+        "matching pattern: {:?} with input line: {}",
+        pattern, input_line
     );
     if index >= input_line.len() {
         match pattern {
@@ -218,7 +218,7 @@ pub fn match_patterns(
             }
         }
         Pattern::StartOfLine => {
-            if context.index == 0 {
+            if index == 0 {
                 return (true, 0);
             }
             let next_char = input_line.chars().next();
@@ -241,9 +241,9 @@ pub fn match_patterns(
             // this is a greedy operator that will match as many characters as possible
             let mut index_increment = 0;
             let mut found = false;
-            loop {
-                let (match_found, increment) =
-                    match_patterns(input_line, p, context, index + index_increment);
+            while let (match_found, increment) =
+                match_patterns(input_line, p, context, index + index_increment)
+            {
                 if !match_found {
                     break;
                 }
@@ -256,14 +256,12 @@ pub fn match_patterns(
             let (found, increment) = match_patterns(input_line, p, context, index);
             if found {
                 (true, increment)
-            } else if input_line.is_empty() {
-                (true, 0)
             } else {
-                (false, 0)
+                (true, 0)
             }
         }
         Pattern::WildcardChar => (!input_line.is_empty(), 1),
-        Pattern::Alternation(_sequences) => unimplemented!(),
+        Pattern::Alternation(sequences) => unimplemented!(),
         //sequences.iter().any(|s| {
         //    s.0.iter()
         //        .all(|p| match_patterns(input_line, p, context, index))
@@ -284,10 +282,10 @@ pub fn match_patterns(
                 } else {
                     let (found, match_increment) =
                         match_patterns(input_line, p, context, index + index_increment);
+                    increment = match_increment;
                     if !found {
                         return (false, 0);
                     }
-                    index_increment += match_increment;
                 }
 
                 //let increment = match p {
@@ -296,7 +294,7 @@ pub fn match_patterns(
                 //    Pattern::EndOfLine => 0,
                 //    _ => 1,
                 //};
-                //index_increment += increment;
+                index_increment += increment;
                 //input_line = &input_line[increment..];
                 //index_in_line += increment;
                 //println!("pattern matched: {:?}", p);
