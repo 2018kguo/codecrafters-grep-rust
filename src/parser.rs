@@ -88,7 +88,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                     _ => (),
                 }
                 let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
-                println!("character group: {}", character_group);
+                //println!("character group: {}", character_group);
                 let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
                 let unwrapped_patterns = match patterns_parsed_from_group {
                     Pattern::Sequence(p) => p,
@@ -170,10 +170,10 @@ fn read_capture_group_string(
     if !(capture_group_string.contains('(') && capture_group_string.contains(')')) {
         let capture_group_string = capture_group_string.to_string();
         capture_groups.insert(current_capture_group_number, capture_group_string.clone());
-        println!(
-            "inserting into capture groups at position: {} {}",
-            capture_group_string, current_capture_group_number
-        );
+        //println!(
+        //    "inserting into capture groups at position: {} {}",
+        //    capture_group_string, current_capture_group_number
+        //);
         return capture_group_string;
     }
     let mut index = 0;
@@ -185,6 +185,7 @@ fn read_capture_group_string(
                 let mut nested_capture_group_string = "".to_string();
                 let mut nested_level = 1;
                 while nested_level > 0 {
+                    //nested_capture_group_string.push(*capture_group_chars.get(index).unwrap());
                     index += 1;
                     match capture_group_chars.get(index).unwrap() {
                         '(' => nested_level += 1,
@@ -245,7 +246,8 @@ pub fn preprocess_backreferences(pattern: &str) -> String {
             cur_level - 1,
             level_minus_one_string_with_backref_replaced.clone(),
         );
-        new_pattern = new_pattern.replace(&format!("\\{}", cur_level), &capture_group_contents);
+        let capture_group_contents_with_parenthesis = format!("({})", capture_group_contents);
+        new_pattern = new_pattern.replace(&format!("\\{}", cur_level), &capture_group_contents_with_parenthesis);
         cur_level -= 1;
     }
     new_pattern
@@ -282,10 +284,10 @@ pub fn match_patterns(
     context: &Context,
     index: usize,
 ) -> (bool, usize) {
-    println!(
-        "matching pattern: {:?} with input line: {}, and index: {}",
-        pattern, input_line, index
-    );
+    //println!(
+    //    "matching pattern: {:?} with input line: {}, and index: {}",
+    //    pattern, input_line, index
+    //);
     if index >= input_line.len() {
         match pattern {
             Pattern::EndOfLine => return (true, 0),
