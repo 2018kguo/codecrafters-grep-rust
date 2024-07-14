@@ -6,7 +6,9 @@ use std::process;
 mod parser;
 
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    let parsed_pattern = parse_pattern(pattern);
+    let preprocessed_pattern = preprocess_backreferences(pattern);
+    println!("Preprocessed pattern: {}", preprocessed_pattern);
+    let parsed_pattern = parse_pattern(preprocessed_pattern.as_str());
     println!("pattern: {}", pattern);
     println!("Parsed pattern: {:?}", parsed_pattern);
     match parsed_pattern {
@@ -34,5 +36,15 @@ fn main() {
         process::exit(0)
     } else {
         process::exit(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_match_pattern() {
+        let prepreocessed_pattern = "([abcd]+) is [abcd]+, not [^xyz]+"; 
+        //let _parsed_pattern = super::parse_pattern(prepreocessed_pattern);
+        //println!("Parsed pattern: {:?}", _parsed_pattern);
     }
 }

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +39,13 @@ fn parse_escape_char(c: char) -> Pattern {
             Pattern::LiteralString(" ".to_string()),
             Pattern::LiteralString("\t".to_string()),
         ]),
-        _ => Pattern::LiteralString(c.to_string()),
+        _ => {
+            if c.is_numeric() {
+                panic!("Backreferences are not supposed to be handled here.");
+            } else {
+                Pattern::LiteralString(c.to_string())
+            }
+        }
     }
 }
 
@@ -128,7 +136,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                         sequences.push(Sequence(p));
                     }
                     _ => {
-                        return Err(anyhow::anyhow!("Invalid pattern"));
+                        sequences.push(Sequence(vec![parsed_pattern]));
                     }
                 }
                 patterns.push(Pattern::Alternation(sequences));
@@ -149,6 +157,97 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
     } else {
         Ok(Pattern::Sequence(patterns.into_iter().collect()))
     }
+}
+
+fn read_capture_group_string(
+    capture_group_string: &str,
+    capture_groups: &mut HashMap<usize, String>,
+    current_capture_group_number: usize,
+) -> String {
+    let mut capture_group_number = current_capture_group_number;
+    // base case
+    if !(capture_group_string.contains('(') && capture_group_string.contains(')')) {
+        let capture_group_string = capture_group_string.to_string();
+        capture_groups.insert(current_capture_group_number, capture_group_string.clone());
+        println!(
+            "inserting into capture groups at position: {} {}",
+            capture_group_string, current_capture_group_number
+        );
+        return capture_group_string;
+    }
+    let mut index = 0;
+    let capture_group_chars: Vec<char> = capture_group_string.chars().collect();
+    while index < capture_group_string.len() {
+        match capture_group_chars.get(index).unwrap() {
+            '(' => {
+                let index_of_opening_bracket = index;
+                let mut nested_capture_group_string = "".to_string();
+                let mut nested_level = 1;
+                while nested_level > 0 {
+                    index += 1;
+                    match capture_group_chars.get(index).unwrap() {
+                        '(' => nested_level += 1,
+                        ')' => nested_level -= 1,
+                        _ => (),
+                    }
+                    if nested_level > 0 {
+                        nested_capture_group_string.push(*capture_group_chars.get(index).unwrap());
+                    }
+                }
+                let parsed_capture_group_string = read_capture_group_string(
+                    &nested_capture_group_string,
+                    capture_groups,
+                    capture_group_number + 1,
+                );
+                let string_after_capture_group = if index + 1 < capture_group_string.len() {
+                    &capture_group_string[index + 1..]
+                } else {
+                    ""
+                };
+                let string_before_capture_group =
+                    capture_group_string[0..index_of_opening_bracket].to_string();
+                let capture_group_string_with_no_parenthesis = string_before_capture_group
+                    + &parsed_capture_group_string
+                    + string_after_capture_group;
+                capture_groups.insert(
+                    current_capture_group_number,
+                    capture_group_string_with_no_parenthesis,
+                );
+                capture_group_number = *capture_groups.keys().max().unwrap();
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+    return capture_groups
+        .get(&current_capture_group_number)
+        .unwrap()
+        .clone();
+}
+
+pub fn preprocess_backreferences(pattern: &str) -> String {
+    let mut capture_groups: HashMap<usize, String> = HashMap::new();
+    read_capture_group_string(pattern, &mut capture_groups, 0);
+    // the raw string is treated as the 0th level
+    if capture_groups.keys().len() == 1 {
+        return pattern.to_string();
+    }
+    let mut new_pattern = pattern.to_string();
+    let mut cur_level = *capture_groups.keys().max().unwrap();
+    while cur_level > 0 {
+        let level_minus_one_string = capture_groups.get(&(cur_level - 1)).unwrap();
+        let capture_group_contents = capture_groups.get(&cur_level).unwrap().clone();
+        let level_minus_one_string_with_backref_replaced =
+            level_minus_one_string.replace(&format!("\\{}", cur_level), &capture_group_contents);
+        capture_groups.insert(
+            cur_level - 1,
+            level_minus_one_string_with_backref_replaced.clone(),
+        );
+        new_pattern = new_pattern.replace(&format!("\\{}", cur_level), &capture_group_contents);
+        cur_level -= 1;
+    }
+    new_pattern
 }
 
 #[derive(Debug, Clone)]
@@ -297,10 +396,7 @@ pub fn match_patterns(
         }
         Pattern::Sequence(patterns) => {
             let mut index_increment = 0;
-            //let mut index_in_line = context.index;
             for p in patterns {
-                //let new_ctx = Context::new(index_in_line, context.len_original_str);
-                //println!("index in line: {}, input line: {}", index_in_line, input_line);
                 if let Pattern::ZeroOrOne(_) = *p {
                     let (found, match_increment) =
                         match_patterns(input_line, p, context, index + index_increment);
@@ -316,18 +412,6 @@ pub fn match_patterns(
                     }
                     index_increment += match_increment;
                 }
-
-                //let increment = match p {
-                //    Pattern::LiteralString(s) => s.len(),
-                //    Pattern::StartOfLine => 0,
-                //    Pattern::EndOfLine => 0,
-                //    _ => 1,
-                //};
-                //index_increment += increment;
-                //input_line = &input_line[increment..];
-                //index_in_line += increment;
-                //println!("pattern matched: {:?}", p);
-                //println!("index in line: {}, input line: {}", index_in_line, input_line);
             }
             (true, index_increment)
         }
@@ -521,11 +605,81 @@ mod tests {
     }
 
     #[test]
+    fn test_alternation() {
+        let input_line = "a";
+        let pattern =
+            Pattern::Alternation(vec![Sequence(vec![ls!("a")]), Sequence(vec![ls!("b")])]);
+        assert!(match_patterns(input_line, &pattern, c!(), 0).0);
+
+        let input_line = "b";
+        let pattern =
+            Pattern::Alternation(vec![Sequence(vec![Pattern::Alternation(vec![Sequence(
+                vec![ls!("b")],
+            )])])]);
+        assert!(match_patterns(input_line, &pattern, c!(), 0).0);
+    }
+
+    #[test]
     fn test_parse_one_or_more_pattern() {
         let pattern = parse_pattern("ca+t");
         assert_eq!(
             pattern.unwrap(),
             seq!(ls!("c"), Pattern::OneOrMore(Box::new(ls!("a"))), ls!("t"))
         );
+    }
+
+    #[test]
+    fn test_read_capture_group_string() {
+        let mut capture_groups: HashMap<usize, String> = HashMap::new();
+        let capture_group_string = "(a)";
+        let _ = read_capture_group_string(capture_group_string, &mut capture_groups, 0);
+        assert_eq!(capture_groups.get(&0).unwrap(), "a");
+        assert_eq!(capture_groups.get(&1).unwrap(), "a");
+
+        capture_groups.clear();
+
+        let capture_group_string = "(a(b(c)))";
+        let _ = read_capture_group_string(capture_group_string, &mut capture_groups, 0);
+        assert_eq!(capture_groups.get(&0).unwrap(), "abc");
+        assert_eq!(capture_groups.get(&1).unwrap(), "abc");
+        assert_eq!(capture_groups.get(&2).unwrap(), "bc");
+        assert_eq!(capture_groups.get(&3).unwrap(), "c");
+
+        capture_groups.clear();
+        let capture_group_string = "(a(b(c))d)";
+
+        let _ = read_capture_group_string(capture_group_string, &mut capture_groups, 0);
+        assert_eq!(capture_groups.get(&0).unwrap(), "abcd");
+        assert_eq!(capture_groups.get(&1).unwrap(), "abcd");
+        assert_eq!(capture_groups.get(&2).unwrap(), "bc");
+        assert_eq!(capture_groups.get(&3).unwrap(), "c");
+
+        capture_groups.clear();
+
+        let capture_group_string = "one (two (three) four) five";
+        let _ = read_capture_group_string(capture_group_string, &mut capture_groups, 0);
+        assert_eq!(capture_groups.get(&0).unwrap(), "one two three four five");
+        assert_eq!(capture_groups.get(&1).unwrap(), "two three four");
+        assert_eq!(capture_groups.get(&2).unwrap(), "three");
+
+        capture_groups.clear();
+
+        let capture_group_string = "one (two) three (four (five))";
+        let _ = read_capture_group_string(capture_group_string, &mut capture_groups, 0);
+        //assert_eq!(capture_groups.get(&0).unwrap(), "one two three four");
+        assert_eq!(capture_groups.get(&1).unwrap(), "two");
+        assert_eq!(capture_groups.get(&2).unwrap(), "four five");
+        assert_eq!(capture_groups.get(&3).unwrap(), "five");
+    }
+
+    #[test]
+    fn test_preprocess_backreferences() {
+        let pattern = "(\\d+) (\\w+) squares and \\1 \\2 circles";
+        let processed_pattern = preprocess_backreferences(pattern);
+        println!("processed pattern: {}", processed_pattern);
+
+        let pattern = "('(cat) and \\2') is the same as \\1";
+        let processed_pattern = preprocess_backreferences(pattern);
+        println!("processed pattern: {}", processed_pattern);
     }
 }
