@@ -88,6 +88,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                     _ => (),
                 }
                 let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
+                println!("character group: {}", character_group);
                 let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
                 let unwrapped_patterns = match patterns_parsed_from_group {
                     Pattern::Sequence(p) => p,
@@ -98,7 +99,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                 } else {
                     patterns.push(Pattern::PositiveCharacterGroup(unwrapped_patterns));
                 }
-                index = index_of_matching_bracket;
+                index += index_of_matching_bracket;
             }
             '^' => patterns.push(Pattern::StartOfLine),
             '$' => patterns.push(Pattern::EndOfLine),

@@ -43,8 +43,8 @@ fn main() {
 mod tests {
     #[test]
     fn test_match_pattern() {
-        let prepreocessed_pattern = "([abcd]+) is [abcd]+, not [^xyz]+"; 
-        //let _parsed_pattern = super::parse_pattern(prepreocessed_pattern);
-        //println!("Parsed pattern: {:?}", _parsed_pattern);
+        let preprocessed_pattern = "[a] [x]";
+        let _parsed_pattern = super::parse_pattern(preprocessed_pattern);
+        println!("Parsed pattern: {:?}", _parsed_pattern);
     }
 }
