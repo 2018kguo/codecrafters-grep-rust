@@ -19,12 +19,20 @@ pub enum Pattern {
     OneOrMore(Box<Pattern>),
     ZeroOrOne(Box<Pattern>),
     WildcardChar,
-    Alternation(Vec<Sequence>),
+    Alternation(Vec<Sequence>, usize),
     Sequence(Vec<Pattern>),
+    Backreference(usize),
+}
+
+struct ParsingContext {
+    cur_capture_group: usize,
 }
 
 pub fn parse_pattern(pattern: &str) -> Result<Pattern> {
-    parse_pattern_inner(pattern)
+    let mut parsing_context = ParsingContext {
+        cur_capture_group: 0,
+    };
+    parse_pattern_inner(pattern, &mut parsing_context)
 }
 
 fn parse_escape_char(c: char) -> Pattern {
@@ -41,7 +49,7 @@ fn parse_escape_char(c: char) -> Pattern {
         ]),
         _ => {
             if c.is_numeric() {
-                panic!("Backreferences are not supposed to be handled here.");
+                Pattern::Backreference(c.to_digit(10).unwrap() as usize)
             } else {
                 Pattern::LiteralString(c.to_string())
             }
@@ -49,7 +57,7 @@ fn parse_escape_char(c: char) -> Pattern {
     }
 }
 
-fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
+fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) -> Result<Pattern> {
     let mut patterns = Vec::new();
     let mut index = 0;
     let pattern_chars: Vec<char> = pattern_str.chars().collect();
@@ -89,7 +97,8 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                 }
                 let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
                 //println!("character group: {}", character_group);
-                let patterns_parsed_from_group = parse_pattern_inner(character_group)?;
+                let patterns_parsed_from_group =
+                    parse_pattern_inner(character_group, parsing_context)?;
                 let unwrapped_patterns = match patterns_parsed_from_group {
                     Pattern::Sequence(p) => p,
                     _ => vec![patterns_parsed_from_group.clone()],
@@ -104,13 +113,16 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
             '^' => patterns.push(Pattern::StartOfLine),
             '$' => patterns.push(Pattern::EndOfLine),
             '(' => {
+                parsing_context.cur_capture_group += 1;
+                let capture_group_num = parsing_context.cur_capture_group.clone();
                 let mut sequences: Vec<Sequence> = Vec::new();
                 let mut seq_index = index + 1;
                 let mut current_sequence_string = "".to_string();
                 while pattern_str.chars().nth(seq_index).unwrap() != ')' {
                     match pattern_str.chars().nth(seq_index) {
                         Some('|') => {
-                            let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
+                            let parsed_pattern =
+                                parse_pattern_inner(&current_sequence_string, parsing_context)?;
                             match parsed_pattern {
                                 Pattern::Sequence(p) => {
                                     sequences.push(Sequence(p));
@@ -131,7 +143,8 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                     seq_index += 1;
                 }
                 // parse the last alternation from the last separator
-                let parsed_pattern = parse_pattern_inner(&current_sequence_string)?;
+                let parsed_pattern =
+                    parse_pattern_inner(&current_sequence_string, parsing_context)?;
                 match parsed_pattern {
                     Pattern::Sequence(p) => {
                         sequences.push(Sequence(p));
@@ -140,7 +153,7 @@ fn parse_pattern_inner(pattern_str: &str) -> Result<Pattern> {
                         sequences.push(Sequence(vec![parsed_pattern]));
                     }
                 }
-                patterns.push(Pattern::Alternation(sequences));
+                patterns.push(Pattern::Alternation(sequences, capture_group_num));
                 index = seq_index;
             }
             '|' => {
@@ -247,7 +260,10 @@ pub fn preprocess_backreferences(pattern: &str) -> String {
             level_minus_one_string_with_backref_replaced.clone(),
         );
         let capture_group_contents_with_parenthesis = format!("({})", capture_group_contents);
-        new_pattern = new_pattern.replace(&format!("\\{}", cur_level), &capture_group_contents_with_parenthesis);
+        new_pattern = new_pattern.replace(
+            &format!("\\{}", cur_level),
+            &capture_group_contents_with_parenthesis,
+        );
         cur_level -= 1;
     }
     new_pattern
@@ -257,6 +273,7 @@ pub fn preprocess_backreferences(pattern: &str) -> String {
 pub struct Context {
     index: usize,
     len_original_str: usize,
+    capture_group_values: HashMap<usize, String>,
 }
 
 impl Context {
@@ -264,14 +281,15 @@ impl Context {
         Self {
             index,
             len_original_str,
+            capture_group_values: HashMap::new(),
         }
     }
 }
 
 pub fn find_match_within_line(input_line: &str, pattern: &Pattern) -> Option<usize> {
     for i in 0..input_line.len() {
-        let cur_context = Context::new(i, input_line.len());
-        if match_patterns(&input_line[i..], pattern, &cur_context, 0).0 {
+        let mut cur_context = Context::new(i, input_line.len());
+        if match_patterns(&input_line[i..], pattern, &mut cur_context, 0).0 {
             return Some(i);
         }
     }
@@ -281,7 +299,7 @@ pub fn find_match_within_line(input_line: &str, pattern: &Pattern) -> Option<usi
 pub fn match_patterns(
     input_line: &str,
     pattern: &Pattern,
-    context: &Context,
+    context: &mut Context,
     index: usize,
 ) -> (bool, usize) {
     //println!(
@@ -382,7 +400,7 @@ pub fn match_patterns(
             }
         }
         Pattern::WildcardChar => (!input_line.is_empty(), 1),
-        Pattern::Alternation(sequences) => {
+        Pattern::Alternation(sequences, capture_group_num) => {
             // return the increment of the first matching sequence
             for seq in sequences {
                 let (found, increment) = match_patterns(
@@ -392,6 +410,11 @@ pub fn match_patterns(
                     index,
                 );
                 if found {
+                    let input_line_consumed_by_sequence = &input_line[index..index + increment];
+                    context.capture_group_values.insert(
+                        *capture_group_num,
+                        input_line_consumed_by_sequence.to_string(),
+                    );
                     return (true, increment);
                 }
             }
@@ -417,6 +440,14 @@ pub fn match_patterns(
                 }
             }
             (true, index_increment)
+        }
+        Pattern::Backreference(id) => {
+            let capture_group_value = context.capture_group_values.get(id).unwrap();
+            if cur_input_line.starts_with(capture_group_value) {
+                (true, capture_group_value.len())
+            } else {
+                (false, 0)
+            }
         }
     }
 }
@@ -457,7 +488,7 @@ mod tests {
 
     macro_rules! c {
         () => {
-            &Context::new(0, 0)
+            &mut Context::new(0, 0)
         };
     }
 
@@ -611,14 +642,17 @@ mod tests {
     fn test_alternation() {
         let input_line = "a";
         let pattern =
-            Pattern::Alternation(vec![Sequence(vec![ls!("a")]), Sequence(vec![ls!("b")])]);
+            Pattern::Alternation(vec![Sequence(vec![ls!("a")]), Sequence(vec![ls!("b")])], 0);
         assert!(match_patterns(input_line, &pattern, c!(), 0).0);
 
         let input_line = "b";
-        let pattern =
-            Pattern::Alternation(vec![Sequence(vec![Pattern::Alternation(vec![Sequence(
-                vec![ls!("b")],
-            )])])]);
+        let pattern = Pattern::Alternation(
+            vec![Sequence(vec![Pattern::Alternation(
+                vec![Sequence(vec![ls!("b")])],
+                0,
+            )])],
+            0,
+        );
         assert!(match_patterns(input_line, &pattern, c!(), 0).0);
     }
 
