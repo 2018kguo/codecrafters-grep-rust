@@ -41,10 +41,42 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_match_pattern() {
-        let preprocessed_pattern = "[a] [x]";
-        let _parsed_pattern = super::parse_pattern(preprocessed_pattern);
-        println!("Parsed pattern: {:?}", _parsed_pattern);
+        //let preprocessed_pattern = "[a] [x]";
+        //let _parsed_pattern = parse_pattern(preprocessed_pattern);
+        //println!("Parsed pattern: {:?}", _parsed_pattern);
+
+        //let pattern = "('(cat) and \\2') is the same as \\1";
+        //let parsed_pattern = parse_pattern(pattern);
+        //println!("Parsed pattern: {:?}", parsed_pattern);
+
+        //let input_line = "'cat and cat' is the same as 'cat and cat'";
+        //let result = find_match_within_line(input_line, &parsed_pattern.unwrap());
+        //println!("Result: {:?}", result);
+
+        //let pattern = "one (two (three)) four";
+        //let parsed_pattern = parse_pattern(pattern);
+        //println!("Parsed pattern: {:?}", parsed_pattern);
+
+        //let pattern = "d+d";
+        //let parsed_pattern = parse_pattern(pattern);
+        //println!("Parsed pattern: {:?}", parsed_pattern);
+        //let result = find_match_within_line("ddc", &parsed_pattern.unwrap());
+        //println!("Result: {:?}", result);
+
+        //let pattern = "(([abc]+)-([def]+)) is \\1, not ([^xyz]+), \\2, or \\3";
+        //let parsed_pattern = parse_pattern(pattern);
+        //println!("Parsed pattern: {:?}", parsed_pattern);
+        //let result = find_match_within_line("abc-def is abc-def, not efg", &parsed_pattern.unwrap());
+        //println!("Result: {:?}", result);
+
+        let pattern = "([^a]+) b";
+        let parsed_pattern = parse_pattern(pattern);
+        println!("Parsed pattern: {:?}", parsed_pattern);
+        let result = find_match_within_line("d b", &parsed_pattern.unwrap());
+        println!("Result: {:?}", result);
     }
 }

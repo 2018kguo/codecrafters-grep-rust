@@ -72,6 +72,7 @@ fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) 
                 patterns.push(parse_escape_char(*c));
             }
             '+' => {
+                println!("parsing one or more");
                 let last_pattern = patterns.pop().unwrap();
                 patterns.push(Pattern::OneOrMore(Box::new(last_pattern)));
             }
@@ -95,7 +96,11 @@ fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) 
                     None => return Err(anyhow::anyhow!("Invalid character group")),
                     _ => (),
                 }
-                let character_group = &pattern_str[index + 1..index + index_of_matching_bracket];
+                let end_index = match negative {
+                    false => index + index_of_matching_bracket,
+                    true => index + index_of_matching_bracket - 1,
+                };
+                let character_group = &pattern_str[index + 1..end_index];
                 //println!("character group: {}", character_group);
                 let patterns_parsed_from_group =
                     parse_pattern_inner(character_group, parsing_context)?;
@@ -109,6 +114,9 @@ fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) 
                     patterns.push(Pattern::PositiveCharacterGroup(unwrapped_patterns));
                 }
                 index += index_of_matching_bracket;
+                if negative {
+                    index -= 1;
+                }
             }
             '^' => patterns.push(Pattern::StartOfLine),
             '$' => patterns.push(Pattern::EndOfLine),
@@ -117,21 +125,60 @@ fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) 
                 let capture_group_num = parsing_context.cur_capture_group.clone();
                 let mut sequences: Vec<Sequence> = Vec::new();
                 let mut seq_index = index + 1;
+                let mut current_sequence: Vec<Pattern> = Vec::new();
                 let mut current_sequence_string = "".to_string();
                 while pattern_str.chars().nth(seq_index).unwrap() != ')' {
                     match pattern_str.chars().nth(seq_index) {
                         Some('|') => {
                             let parsed_pattern =
                                 parse_pattern_inner(&current_sequence_string, parsing_context)?;
-                            match parsed_pattern {
-                                Pattern::Sequence(p) => {
-                                    sequences.push(Sequence(p));
-                                }
-                                _ => {
-                                    return Err(anyhow::anyhow!("Invalid pattern"));
-                                }
-                            }
+                            current_sequence.push(parsed_pattern);
+                            sequences.push(Sequence(current_sequence.clone()));
+                            current_sequence = Vec::new();
+                            //match parsed_pattern {
+                            //    Pattern::Sequence(p) => {
+                            //        sequences.push(Sequence(p));
+                            //    }
+                            //    _ => {
+                            //        return Err(anyhow::anyhow!("Invalid pattern"));
+                            //    }
+                            //}
                             current_sequence_string = "".to_string();
+                        }
+                        Some('(') => {
+                            if !current_sequence_string.is_empty() {
+                                let parsed_pattern =
+                                    parse_pattern_inner(&current_sequence_string, parsing_context)?;
+                                current_sequence.push(parsed_pattern);
+                                //match parsed_pattern {
+                                //    Pattern::Sequence(p) => {
+                                //        sequences.push(Sequence(p));
+                                //    }
+                                //    _ => {
+                                //        sequences.push(Sequence(vec![parsed_pattern]));
+                                //    }
+                                //}
+                            }
+                            let index_of_matching_nested_bracket = pattern_str[seq_index..]
+                                .find(')')
+                                .ok_or_else(|| anyhow::anyhow!("Invalid capture group"))?;
+                            let nested_capture_group_string = &pattern_str
+                                [seq_index..seq_index + index_of_matching_nested_bracket + 1];
+                            let parsed_pattern =
+                                parse_pattern_inner(nested_capture_group_string, parsing_context)?;
+                            current_sequence.push(parsed_pattern);
+                            //match parsed_pattern {
+                            //    Pattern::Sequence(p) => {
+                            //        sequences.push(Sequence(p));
+                            //    }
+                            //    _ => {
+                            //        sequences.push(Sequence(vec![parsed_pattern]));
+                            //        //println!("invalid parsed pattern: {:?}", parsed_pattern);
+                            //        //return Err(anyhow::anyhow!("Invalid pattern"));
+                            //    }
+                            //}
+                            current_sequence_string = "".to_string();
+                            seq_index += index_of_matching_nested_bracket;
                         }
                         Some(c) => {
                             current_sequence_string.push(c);
@@ -141,18 +188,23 @@ fn parse_pattern_inner(pattern_str: &str, parsing_context: &mut ParsingContext) 
                         }
                     }
                     seq_index += 1;
+                    println!("seq index, pattern_str {} {}", seq_index, pattern_str);
                 }
                 // parse the last alternation from the last separator
-                let parsed_pattern =
-                    parse_pattern_inner(&current_sequence_string, parsing_context)?;
-                match parsed_pattern {
-                    Pattern::Sequence(p) => {
-                        sequences.push(Sequence(p));
-                    }
-                    _ => {
-                        sequences.push(Sequence(vec![parsed_pattern]));
-                    }
+                if !current_sequence_string.is_empty() {
+                    let parsed_pattern =
+                        parse_pattern_inner(&current_sequence_string, parsing_context)?;
+                    //match parsed_pattern {
+                    //    Pattern::Sequence(p) => {
+                    //        sequences.push(Sequence(p));
+                    //    }
+                    //    _ => {
+                    //        sequences.push(Sequence(vec![parsed_pattern]));
+                    //    }
+                    //}
+                    current_sequence.push(parsed_pattern);
                 }
+                sequences.push(Sequence(current_sequence.clone()));
                 patterns.push(Pattern::Alternation(sequences, capture_group_num));
                 index = seq_index;
             }
@@ -301,33 +353,36 @@ pub fn match_patterns(
     pattern: &Pattern,
     context: &mut Context,
     index: usize,
-) -> (bool, usize) {
+) -> (bool, Vec<usize>) {
     //println!(
     //    "matching pattern: {:?} with input line: {}, and index: {}",
     //    pattern, input_line, index
     //);
     if index >= input_line.len() {
         match pattern {
-            Pattern::EndOfLine => return (true, 0),
-            Pattern::ZeroOrOne(_) => return (true, 0),
-            _ => return (false, 0),
+            Pattern::EndOfLine => return (true, vec![0]),
+            Pattern::ZeroOrOne(_) => return (true, vec![0]),
+            Pattern::Sequence(p) => {
+                return (p.is_empty(), vec![0]);
+            }
+            _ => return (false, vec![0]),
         }
     }
     let cur_input_line = &input_line[index..];
     match pattern {
-        Pattern::LiteralString(s) => (cur_input_line.starts_with(s), s.len()),
+        Pattern::LiteralString(s) => (cur_input_line.starts_with(s), vec![s.len()]),
         Pattern::DigitChar => {
             let next_char = cur_input_line.chars().next();
             match next_char {
-                Some(c) => (c.is_numeric(), 1),
-                None => (false, 0),
+                Some(c) => (c.is_numeric(), vec![1]),
+                None => (false, vec![0]),
             }
         }
         Pattern::AlphanumericChar => {
             let next_char = cur_input_line.chars().next();
             match next_char {
-                Some(c) => (c.is_alphanumeric(), 1),
-                None => (false, 0),
+                Some(c) => (c.is_alphanumeric(), vec![1]),
+                None => (false, vec![0]),
             }
         }
         Pattern::PositiveCharacterGroup(patterns) => {
@@ -337,9 +392,9 @@ pub fn match_patterns(
                     patterns
                         .iter()
                         .any(|p| match_patterns(&c.to_string(), p, context, 0).0),
-                    1,
+                    vec![1],
                 ),
-                None => (false, 0),
+                None => (false, vec![0]),
             }
         }
         Pattern::NegativeCharacterGroup(patterns) => {
@@ -349,57 +404,66 @@ pub fn match_patterns(
                     !patterns
                         .iter()
                         .any(|p| match_patterns(&c.to_string(), p, context, 0).0),
-                    1,
+                    vec![1],
                 ),
-                None => (false, 0),
+                None => (false, vec![0]),
             }
         }
         Pattern::StartOfLine => {
             if context.index == 0 {
-                return (true, 0);
+                return (true, vec![0]);
             }
             let next_char = input_line.chars().next();
             match next_char {
-                Some(c) => (c == '\n', 0),
-                None => (false, 0),
+                Some(c) => (c == '\n', vec![0]),
+                None => (false, vec![0]),
             }
         }
         Pattern::EndOfLine => {
             if index >= input_line.len() {
-                return (true, 0);
+                return (true, vec![0]);
             }
             let next_char = input_line.chars().next_back();
             match next_char {
-                Some(c) => (c == '\n', 0),
-                None => (false, 0),
+                Some(c) => (c == '\n', vec![0]),
+                None => (false, vec![0]),
             }
         }
         Pattern::OneOrMore(p) => {
             // this is a greedy operator that will match as many characters as possible
             let mut index_increment = 0;
-            let mut found = false;
+            let mut matching_increments = vec![];
             loop {
-                let (match_found, increment) =
+                let (match_found, _increments) =
                     match_patterns(input_line, p, context, index + index_increment);
-                if !match_found {
+                //if !match_found {
+                //    if context.index == 0 {
+                //        dbg!("match not found for {} at index {}", p, index + index_increment);
+                //    }
+                //    break;
+                //}
+                //dbg!(&_increments);
+                if match_found {
+                    matching_increments.push(index_increment + _increments[0]);
+                } else {
                     break;
                 }
-                found = true;
-                index_increment += increment;
+                index_increment += 1;
             }
-            (found, index_increment)
+            let found = !matching_increments.is_empty();
+            (found, matching_increments)
         }
         Pattern::ZeroOrOne(p) => {
             let (found, increment) = match_patterns(input_line, p, context, index);
             if found {
                 (true, increment)
             } else if input_line.is_empty() {
-                (true, 0)
+                (true, vec![0])
             } else {
-                (false, 0)
+                (false, vec![0])
             }
         }
-        Pattern::WildcardChar => (!input_line.is_empty(), 1),
+        Pattern::WildcardChar => (!input_line.is_empty(), vec![1]),
         Pattern::Alternation(sequences, capture_group_num) => {
             // return the increment of the first matching sequence
             for seq in sequences {
@@ -410,46 +474,204 @@ pub fn match_patterns(
                     index,
                 );
                 if found {
-                    let input_line_consumed_by_sequence = &input_line[index..index + increment];
+                    let used_inc = increment[0];
+                    let input_line_consumed_by_sequence = &input_line[index..index + used_inc];
                     context.capture_group_values.insert(
                         *capture_group_num,
                         input_line_consumed_by_sequence.to_string(),
                     );
+                    println!(
+                        "inserting into capture groups at position: {} {}",
+                        input_line_consumed_by_sequence, *capture_group_num
+                    );
                     return (true, increment);
                 }
             }
-            (false, 0)
+            (false, vec![0])
         }
         Pattern::Sequence(patterns) => {
-            let mut index_increment = 0;
-            for p in patterns {
-                if let Pattern::ZeroOrOne(_) = *p {
-                    let (found, match_increment) =
-                        match_patterns(input_line, p, context, index + index_increment);
-                    if !found {
-                        continue;
-                    }
-                    index_increment += match_increment;
-                } else {
-                    let (found, match_increment) =
-                        match_patterns(input_line, p, context, index + index_increment);
-                    if !found {
-                        return (false, 0);
-                    }
-                    index_increment += match_increment;
-                }
-            }
-            (true, index_increment)
+            let (found, increment) = match_sequence(input_line, patterns, context, index, 0);
+            (found, vec![increment])
+            //let mut index_increment = 0;
+            //for p in patterns {
+            //    match p {
+            //        Pattern::ZeroOrOne(_) => {
+            //            let (found, match_increment) =
+            //                match_patterns(input_line, p, context, index + index_increment);
+            //            if !found {
+            //                continue;
+            //            }
+            //            index_increment += match_increment[0];
+            //        }
+            //        Pattern::OneOrMore(_) => {
+            //            // this one is tricky because it's not a greedy match.
+            //            // we need to match as many characters as possible but also
+            //            // backtrack if the next pattern doesn't match
+            //            let mut found = false;
+            //            let mut match_increment = 0;
+            //            loop {
+            //                let (match_found, increments) =
+            //                    match_patterns(input_line, p, context, index + index_increment);
+            //                if !match_found {
+            //                    break;
+            //                }
+            //                found = true;
+            //                for inc in increments {
+            //                    match_increment += inc;
+            //                }
+            //                match_increment += increment;
+            //            }
+            //        }
+            //        _ => {
+            //            let (found, match_increment) =
+            //                match_patterns(input_line, p, context, index + index_increment);
+            //            if !found {
+            //                return (false, vec![0]);
+            //            }
+            //            index_increment += match_increment[0];
+            //        },
+            //    }
+            //    //if let Pattern::ZeroOrOne(_) = *p {
+            //    //    let (found, match_increment) =
+            //    //        match_patterns(input_line, p, context, index + index_increment);
+            //    //    if !found {
+            //    //        continue;
+            //    //    }
+            //    //    index_increment += match_increment;
+            //    //} else {
+            //    //    let (found, match_increment) =
+            //    //        match_patterns(input_line, p, context, index + index_increment);
+            //    //    if !found {
+            //    //        return (false, 0);
+            //    //    }
+            //    //    index_increment += match_increment;
+            //    //}
+            //}
+            //(true, vec![index_increment])
         }
         Pattern::Backreference(id) => {
+            println!("fetching from backreference id: {}", id);
+            println!("context: {:?}", context);
+            println!("capture group values: {:?}", context.capture_group_values);
+            if !context.capture_group_values.contains_key(id) {
+                println!("backreference id not found: {}", id);
+                return (false, vec![0]);
+            }
             let capture_group_value = context.capture_group_values.get(id).unwrap();
             if cur_input_line.starts_with(capture_group_value) {
-                (true, capture_group_value.len())
+                (true, vec![capture_group_value.len()])
             } else {
-                (false, 0)
+                (false, vec![0])
             }
         }
     }
+}
+
+fn match_sequence(
+    input_line: &str,
+    patterns: &Vec<Pattern>,
+    context: &mut Context,
+    index: usize,
+    depth: usize,
+) -> (bool, usize) {
+    println!("START OF SEQUENCE MATCH");
+    println!("depth: {}", depth);
+    dbg!(patterns);
+    println!("---- start ---- ");
+    //// backtracks if the next pattern doesn't match
+    let mut index_increment = 0;
+    let mut pattern_index = 0;
+    for p in patterns {
+        println!("in p for loop at depth: {}", depth);
+        match p {
+            Pattern::ZeroOrOne(_) => {
+                let (found, match_increment) =
+                    match_patterns(input_line, p, context, index + index_increment);
+                if !found {
+                    continue;
+                }
+                index_increment += match_increment[0];
+            }
+            Pattern::OneOrMore(_) => {
+                // this one is tricky because it's not a greedy match.
+                // we need to match as many characters as possible but also
+                // backtrack if the next pattern doesn't match
+                //let mut found = false;
+                //let mut match_increment = 0;
+                let (match_found, increments) =
+                    match_patterns(input_line, p, context, index + index_increment);
+                //println!("seq match found: {}", match_found);
+                if context.index == 0 {
+                    println!("seq increments: {:?}", increments);
+                    dbg!(&context);
+                }
+                if !match_found {
+                    return (false, 0);
+                }
+                let mut found = false;
+                //let mut match_increment = 0;
+                let reverse_sorted_increments = increments.iter().rev();
+                for inc in reverse_sorted_increments.clone() {
+                    let next_patterns = if pattern_index + 1 < patterns.len() {
+                        patterns[pattern_index + 1..].to_vec()
+                    } else {
+                        vec![]
+                    };
+                    // TODO: fix this since this is not aware of the top level sequence, only the
+                    // current nested one.
+                    let next_patterns_as_sequence = Pattern::Sequence(next_patterns);
+                    if context.index == 0 {
+                        println!("----");
+                        println!("patterns: {:?}", patterns);
+                        println!("next patterns as seq: {:?}", next_patterns_as_sequence);
+                        println!("reverse sorted increments: {:?}", reverse_sorted_increments);
+                        println!("----");
+                    }
+                    let (seq_matches, _seq_increment) = match_sequence(
+                        input_line,
+                        &vec![next_patterns_as_sequence.clone()],
+                        context,
+                        index + index_increment + inc,
+                        depth + 1,
+                    );
+                    if context.index == 0 {
+                        //println!("seq matches: {}", seq_matches);
+                        println!("increment and seq matches: {} {}", inc, seq_matches);
+                    }
+                    if seq_matches {
+                        //println!("seq increment: {}", _seq_increment);
+                        index_increment += inc;
+                        //println!("index increment: {}", index_increment);
+                        found = true;
+                        if context.index == 0 {
+                            println!("found: {} with inc {}", found, inc);
+                            println!("capture group values: {:?}", context.capture_group_values);
+                            println!("next pattersn as sequence: {:?}", next_patterns_as_sequence);
+                        }
+                        break;
+                    }
+                }
+                if !found {
+                    println!("context index: {}", context.index);
+                    return (false, 0);
+                }
+                //match_increment += match_increment;
+            }
+            _ => {
+                println!("matching pattern: {:?}", p);
+                let (found, match_increment) =
+                    match_patterns(input_line, p, context, index + index_increment);
+                if !found {
+                    //println!("pattern not found: {:?}", p);
+                    return (false, 0);
+                }
+                index_increment += match_increment[0];
+            }
+        }
+        pattern_index += 1;
+    }
+    println!("END OF SEQUENCE MATCH at depth: {}", depth);
+    (true, index_increment)
 }
 
 #[cfg(test)]
